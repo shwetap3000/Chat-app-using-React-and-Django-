@@ -537,6 +537,326 @@ You will build:
 
 This is where you will finally see **how messages travel through WebSockets**.
 
-Before we move forward, confirm one thing:
 
-Were you able to **install the packages and update `settings.py` successfully without errors**?
+
+
+
+
+Good. Now we move to **Phase 5 — Part 3: Creating the WebSocket System**.
+This is where we actually build the components that allow **real-time chat communication**.
+
+In this part we will create three important things:
+1. **Consumer** (WebSocket handler)
+2. **WebSocket routing**
+3. **ASGI configuration update**
+
+These three components together allow Django to **receive and send WebSocket messages**.
+
+---
+
+# 1 — Understanding What a Consumer Is
+
+In Django Channels, a **Consumer** plays the same role as a **View** in REST APIs.
+
+Comparison:
+
+REST API
+```
+Client → View → Response
+```
+
+WebSocket
+```
+Client → Consumer → WebSocket response
+```
+
+A **Consumer** is responsible for:
+* accepting WebSocket connections
+* receiving messages
+* sending messages
+* handling connection closing
+Think of it as a **WebSocket controller**.
+
+---
+
+# 2 — Create the Consumer File
+
+Inside your **chat app**, create a new file:
+```
+chat/consumers.py
+```
+
+Add the following code.
+
+```python
+import json
+from channels.generic.websocket import WebsocketConsumer
+
+class ChatConsumer(WebsocketConsumer):
+
+    def connect(self):
+        self.accept()
+
+    def receive(self, text_data):
+        data = json.loads(text_data)
+        message = data['message']
+
+        self.send(text_data=json.dumps({
+            'message': message
+        }))
+```
+
+---
+
+# 3 — Understanding This Code
+
+Let’s break it down carefully.
+
+### Import section
+
+```python
+from channels.generic.websocket import WebsocketConsumer
+```
+
+`WebsocketConsumer` is a class provided by **Django Channels** that handles WebSocket connections.
+
+We inherit from it to create our own consumer.
+
+---
+
+### `connect()` method
+
+```python
+def connect(self):
+    self.accept()
+```
+
+This runs **when a client tries to connect to the WebSocket**.
+
+`self.accept()` means:
+The server **accepts the connection**.
+
+Without this line the WebSocket connection will be rejected.
+
+---
+
+### `receive()` method
+
+```python
+def receive(self, text_data):
+```
+
+This method runs **whenever the client sends data through the WebSocket**.
+
+Example message sent from frontend:
+
+```json
+{
+  "message": "Hello"
+}
+```
+
+---
+
+### Convert JSON to Python
+
+```python
+data = json.loads(text_data)
+```
+
+WebSocket messages arrive as **JSON strings**, so we convert them to Python objects.
+
+---
+
+### Extract message
+
+```python
+message = data['message']
+```
+
+Now we extract the actual chat message.
+
+---
+
+### Send response back
+
+```python
+self.send(text_data=json.dumps({
+    'message': message
+}))
+```
+
+The server sends the same message back.
+
+This is just a **simple echo system** to confirm WebSockets are working.
+
+Later we will:
+* save messages in the database
+* broadcast messages to other users
+
+---
+
+# 4 — Create WebSocket Routing
+
+Now we define **WebSocket URLs**, similar to how Django has `urls.py` for HTTP.
+
+Inside the **chat app**, create:
+```
+chat/routing.py
+```
+
+Add this code.
+
+```python
+from django.urls import re_path
+from . import consumers
+
+websocket_urlpatterns = [
+    re_path(r'ws/chat/$', consumers.ChatConsumer.as_asgi()),
+]
+```
+
+Explanation:
+
+`ws/chat/` is the **WebSocket endpoint**.
+
+Frontend will connect using:
+```
+ws://localhost:8000/ws/chat/
+```
+
+---
+
+# 5 — Update the ASGI File
+
+Now we connect WebSocket routing with the Django project.
+
+Open:
+```
+projectname/asgi.py
+```
+
+Replace the content with:
+
+```python
+import os
+from django.core.asgi import get_asgi_application
+from channels.routing import ProtocolTypeRouter, URLRouter
+from channels.auth import AuthMiddlewareStack
+import chat.routing
+
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'projectname.settings')
+
+application = ProtocolTypeRouter({
+    "http": get_asgi_application(),
+    "websocket": AuthMiddlewareStack(
+        URLRouter(
+            chat.routing.websocket_urlpatterns
+        )
+    ),
+})
+```
+
+---
+
+# 6 — Understanding the ASGI Configuration
+
+This file now tells Django how to route connections.
+
+### ProtocolTypeRouter
+
+This decides **what type of connection is incoming**.
+```
+HTTP request → normal Django
+WebSocket → Channels routing
+```
+
+---
+
+### URLRouter
+
+Routes WebSocket requests to the correct **consumer**.
+
+Example:
+```
+ws/chat/ → ChatConsumer
+```
+
+---
+
+### AuthMiddlewareStack
+
+This enables **user authentication inside WebSockets**.
+
+So later we can know:
+```
+which user sent the message
+```
+
+---
+
+# 7 — What Happens Now
+
+When a user connects to:
+```
+ws://localhost:8000/ws/chat/
+```
+
+The flow becomes:
+
+```
+React client
+      ↓
+ASGI server
+      ↓
+ProtocolTypeRouter
+      ↓
+WebSocket routing
+      ↓
+ChatConsumer
+```
+
+The consumer now:
+* accepts connection
+* receives messages
+* sends responses
+
+---
+
+# 8 — Testing the WebSocket
+
+Your Django server should now run normally:
+```
+python manage.py runserver
+```
+
+But browsers cannot easily test WebSockets directly.
+
+Later when we connect **React**, we will see the messages instantly.
+
+---
+
+# What We Achieved in Phase 5 Part 3
+
+Your backend now has:
+• WebSocket consumer
+• WebSocket routing
+• ASGI WebSocket configuration
+
+This means your Django project is now **WebSocket capable**.
+
+But the chat is still incomplete because:
+* messages are not saved in the database
+* messages are not broadcast to multiple users
+* chat rooms are not implemented
+
+---
+
+# Next Part (Phase 5 — Part 4)
+
+In the next step we will implement the **real chat logic**:
+• join a conversation room
+• broadcast messages to all participants
+• store messages in the database
+
+This will turn the echo system into a **real multi-user chat system**.
