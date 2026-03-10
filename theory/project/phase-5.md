@@ -860,3 +860,326 @@ In the next step we will implement the **real chat logic**:
 • store messages in the database
 
 This will turn the echo system into a **real multi-user chat system**.
+
+
+
+
+
+
+Excellent. Now we move to **Phase 5 — Part 4: Building the Real Chat Logic**.
+Until now the WebSocket only **echoed messages back to the same user**. Now we will turn it into a **real multi-user chat system**.
+
+In this step we will implement:
+1. **Chat Rooms (Conversation rooms)**
+2. **Broadcast messages to all users**
+3. **Save messages in the database**
+4. **Send messages to everyone in the conversation**
+
+This is the **core mechanism of chat apps**.
+
+---
+
+# 1 — Understanding Chat Rooms
+
+Every conversation must have its **own WebSocket room**.
+
+Example:
+
+Conversation 1
+```
+User A
+User B
+```
+
+Conversation 2
+```
+User C
+User D
+```
+
+So we create **different WebSocket groups**.
+
+Example group names:
+```
+chat_1
+chat_2
+chat_3
+```
+
+Where the number is the **conversation ID**.
+When a user opens a chat, they join that group.
+
+Flow:
+```
+User connects
+↓
+Join group chat_1
+↓
+Send message
+↓
+Server broadcasts to group chat_1
+↓
+All participants receive message
+```
+
+---
+
+# 2 — Update WebSocket Routing
+
+Open:
+```
+chat/routing.py
+```
+
+Modify the URL so that the **conversation id is included**.
+
+```python
+from django.urls import re_path
+from . import consumers
+
+websocket_urlpatterns = [
+    re_path(r'ws/chat/(?P<conversation_id>\d+)/$', consumers.ChatConsumer.as_asgi()),
+]
+```
+
+Now WebSocket URLs look like:
+```
+ws://localhost:8000/ws/chat/1/
+```
+Here `1` is the **conversation id**.
+
+---
+
+# 3 — Update the Consumer
+
+Now we rewrite the consumer to support:
+* groups
+* broadcasting
+* database storage
+
+Open:
+```
+chat/consumers.py
+```
+
+Replace the code with this.
+
+```python
+import json
+from channels.generic.websocket import WebsocketConsumer
+from asgiref.sync import async_to_sync
+from .models import Message, Conversation
+from django.contrib.auth.models import User
+
+
+class ChatConsumer(WebsocketConsumer):
+
+    def connect(self):
+
+        self.conversation_id = self.scope['url_route']['kwargs']['conversation_id']
+        self.room_group_name = f"chat_{self.conversation_id}"
+
+        # join room
+        async_to_sync(self.channel_layer.group_add)(
+            self.room_group_name,
+            self.channel_name
+        )
+
+        self.accept()
+
+
+    def disconnect(self, close_code):
+
+        # leave room
+        async_to_sync(self.channel_layer.group_discard)(
+            self.room_group_name,
+            self.channel_name
+        )
+
+
+    def receive(self, text_data):
+
+        data = json.loads(text_data)
+        message = data['message']
+        sender_id = data['sender']
+
+        conversation = Conversation.objects.get(id=self.conversation_id)
+        sender = User.objects.get(id=sender_id)
+
+        # save message to database
+        Message.objects.create(
+            conversation=conversation,
+            sender=sender,
+            content=message
+        )
+
+        # broadcast message to group
+        async_to_sync(self.channel_layer.group_send)(
+            self.room_group_name,
+            {
+                'type': 'chat_message',
+                'message': message,
+                'sender': sender.username
+            }
+        )
+
+
+    def chat_message(self, event):
+
+        message = event['message']
+        sender = event['sender']
+
+        self.send(text_data=json.dumps({
+            'message': message,
+            'sender': sender
+        }))
+```
+
+---
+
+# 4 — Understanding the Important Parts
+
+## Getting conversation ID
+```
+self.scope['url_route']['kwargs']['conversation_id']
+```
+This extracts the ID from the WebSocket URL.
+
+Example:
+```
+ws/chat/1/
+```
+Conversation id = **1**
+
+---
+
+# Joining a Group
+```
+self.channel_layer.group_add()
+```
+This adds the user to a **chat room group**.
+
+Example group:
+```
+chat_1
+```
+All users connected to this group receive the same messages.
+
+---
+
+# Saving Messages
+```
+Message.objects.create(...)
+```
+Every time a message arrives we store it in the database.
+So the chat history is preserved.
+
+---
+
+# Broadcasting Messages
+```
+self.channel_layer.group_send()
+```
+This sends the message to **everyone inside the room**.
+
+Example:
+```
+User A sends message
+↓
+Server broadcasts
+↓
+User B receives message instantly
+```
+
+---
+
+# Sending Message to Client
+```
+self.send()
+```
+This pushes the message back to the frontend.
+The frontend will then display the new message.
+
+---
+
+# 5 — Message Flow in the System
+
+Now the full process becomes:
+```
+User A sends message via WebSocket
+↓
+ChatConsumer.receive()
+↓
+Save message in database
+↓
+Send message to Redis channel layer
+↓
+Broadcast to group chat_1
+↓
+All connected users receive message
+↓
+Frontend updates instantly
+```
+
+---
+
+# 6 — Real Architecture Now
+
+Your chat system now works like this:
+```
+React Frontend
+      │
+      │ WebSocket
+      ▼
+Django Channels (Consumer)
+      │
+      │ broadcast
+      ▼
+Redis Channel Layer
+      │
+      ▼
+Other connected users
+
+Database
+stores chat history
+```
+
+---
+
+# 7 — What You Have Built So Far
+
+Your backend now supports:
+✔ WebSocket connections
+✔ Conversation chat rooms
+✔ Real-time message broadcasting
+✔ Database message storage
+
+This is essentially the **same architecture used in real chat systems**.
+
+---
+
+# Next Phase
+
+The backend is now almost complete.
+
+The next step is **Phase 6 — Connecting the React Frontend to the WebSocket server**.
+
+In that phase you will learn:
+
+* how React opens WebSocket connections
+* how messages are sent
+* how real-time UI updates happen
+
+---
+
+Before we move there, I want to check something important for correctness.
+
+In the consumer we used:
+
+```
+async_to_sync(self.channel_layer.group_add)
+```
+
+Do you understand **why we needed `async_to_sync` here?**
+
+This concept is very important in Django Channels.
