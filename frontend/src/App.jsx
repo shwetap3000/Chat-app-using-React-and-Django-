@@ -1,9 +1,8 @@
+import React from "react";
+import Chat from "./chat";
+
 function App() {
-  return (
-    <div>
-      <h2>Chat Application using React and Django</h2>
-    </div>
-  )
+  return <Chat />
 }
 
 export default App;
